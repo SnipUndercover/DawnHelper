@@ -21,40 +21,47 @@ public class SuperDashBumper : Bumper
 
     public static void Load()
     {
-        On.Celeste.Player.DashEnd += modPlayerDashEnd;
-        Everest.Events.Player.OnDie += soupResetMethod;
-        Everest.Events.Player.OnRegisterStates += playerSoup;
+        On.Celeste.Player.DashEnd += ResetSoupOnDashEnd;
+        Everest.Events.Player.OnDie += ResetSoupOnDeath;
+        Everest.Events.Player.OnRegisterStates += AddPlayerSoupData;
     }
 
     public static void Unload()
     {
-        On.Celeste.Player.DashEnd -= modPlayerDashEnd;
-        Everest.Events.Player.OnDie -= soupResetMethod;
-        Everest.Events.Player.OnRegisterStates -= playerSoup;
+        On.Celeste.Player.DashEnd -= ResetSoupOnDashEnd;
+        Everest.Events.Player.OnDie -= ResetSoupOnDeath;
+        Everest.Events.Player.OnRegisterStates -= AddPlayerSoupData;
     }
 
-    private static void modPlayerDashEnd(On.Celeste.Player.orig_DashEnd orig, Player self)
+    private static void ResetSoupOnDashEnd(On.Celeste.Player.orig_DashEnd orig, Player self)
     {
-        if (self.Get<soupBump>() is soupBump soup && soup.bumpHit)
-        {
-            SaveData.Instance.Assists.SuperDashing = false;
-            soup.bumpHit = false;
-        }
+        DisableTemporarySoup(self);
         orig(self);
     }
 
-    private static void soupResetMethod(Player player)
+    private static void ResetSoupOnDeath(Player player)
     {
-        if (player.Get<soupBump>() is soupBump soup && soup.bumpHit)
+        if (player.Get<SoupData>() is { isTemporarySuperdash: true } soup)
         {
-            soup.bumpHit = false;
+            // this is a temporary superdash; reset the variant
+            soup.isTemporarySuperdash = false;
             SaveData.Instance.Assists.SuperDashing = false;
         }
     }
 
-    private static void playerSoup(Player player)
+    private static void AddPlayerSoupData(Player player)
     {
-        player.Add(new soupBump());
+        player.Add(new SoupData());
+    }
+
+    private static void DisableTemporarySoup(Player player)
+    {
+        if (player.Get<SoupData>() is { isTemporarySuperdash: true } soup)
+        {
+            // this is a temporary superdash; reset the variant
+            soup.isTemporarySuperdash = false;
+            SaveData.Instance.Assists.SuperDashing = false;
+        }
     }
 
     public SuperDashBumper(EntityData data, Vector2 offset) : base(data, offset)
@@ -80,10 +87,10 @@ public class SuperDashBumper : Bumper
         sprite.CenterOrigin();
     }
 
-    internal class soupBump : Component
+    internal class SoupData : Component
     {
-        public bool bumpHit;
-        public soupBump() : base(false, false) { }
+        public bool isTemporarySuperdash;
+        public SoupData() : base(false, false) { }
     }
 
     public override void Added(Scene scene)
@@ -125,7 +132,7 @@ public class SuperDashBumper : Bumper
             player.RefillDash();
     }
 
-
+    // also mostly copied from Player.ExplodeLaunch
     public Vector2 ExplodeDashLaunch(Player player, Vector2 from, bool snapUp = true, bool sidesOnly = false)
     {
         //Preserves speed because what good entity doesn't? 
@@ -186,13 +193,15 @@ public class SuperDashBumper : Bumper
         if (spead && verticalStretch)
             Alarm.Set(player, 0.03f, () => player.Speed.Y = fast.Y);
 
-        //soup
-        if (soup)
+        // soup
+        // if the variant isn't already enabled map-wide, mark this superdash as temporary
+        // the variant will be turned back off in DashEnd
+        if (soup && !SaveData.Instance.Assists.SuperDashing)
         {
             SaveData.Instance.Assists.SuperDashing = true;
-            //Differentiates between the bumper superdash and the player superdash
-            player.Get<soupBump>().bumpHit = true;
+            player.Get<SoupData>().isTemporarySuperdash = true;
         }
+
         //Prevents the dash direction override being permanent
         Alarm.Set(player, 0.1f, () => player.OverrideDashDirection = null);
         //Preserves crouched state when demo'd into 
